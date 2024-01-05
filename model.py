@@ -184,6 +184,9 @@ class GPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
+            # negative log likelihood: -sum(yi*ln(f(xi)))
+            # F.cross_entropy() expects input shape: (batch, channels) 
+            # so we need to reshape logits/targets
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
@@ -323,8 +326,8 @@ class GPT(nn.Module):
             # apply softmax to convert logits to (normalized) probabilities
             probs = F.softmax(logits, dim=-1)
             # sample from the distribution
-            idx_next = torch.multinomial(probs, num_samples=1)
-            # append sampled index to the running sequence and continue
+            idx_next = torch.multinomial(probs, num_samples=1)  # (b, 1)
+            # append sampled index to the running sequence and continue, (b, t) -> (b, t+1)
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
