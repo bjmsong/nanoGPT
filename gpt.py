@@ -1,5 +1,5 @@
 """
-The model articture is based on "Attention is all you need" with some changes:
+The model architecture is based on "Attention is all you need" with some changes:
 - only decoder
 - remove cross attention
 - pre-norm replace post-norm
