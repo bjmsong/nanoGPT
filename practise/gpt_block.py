@@ -13,11 +13,11 @@ dropout = 0.2
 class FeedForwardNN(nn.Moduel):
     def __init__(self):
         super.__init__()
-        self.net = nn.Sequantial(
+        self.net = nn.Sequential(
             nn.Linear(n_embd, 4*n_embd),
-            nn.ReLU();
+            nn.ReLU(),
             nn.Linear(4*n_embd, n_embd),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -26,7 +26,7 @@ class FeedForwardNN(nn.Moduel):
 class Head(nn.Module):
     def __init__(self):
         super.__init__()
-        self.key = nn.Linear(n_embd,head_size, bias=False)
+        self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.register_buffer("tril", torch.tril(torch.ones(max_seq_len, max_seq_len)))
@@ -62,13 +62,13 @@ class MultiHeadAttention(nn.Moduel):
 class GPTBlock(nn.Module):
     def __init__(self):
         super.__init__()
-        self.sa = MultiHeadAttention(n_head, n_embd // n_head)
+        self.mha = MultiHeadAttention(n_head, n_embd // n_head)
         self.ffn = FeedForwardNN()
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
     def forward(self, x):
-        out = x + (self.sa(self.ln1(x)))
+        out = x + (self.mha(self.ln1(x)))
         out = out + (self.ffn(self.ln2(x)))
 
         return self.dropout(out)
