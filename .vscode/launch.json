@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "python": "/root/miniconda3/bin/python",
+            "name": "Python: 当前文件",
+            "type": "python",
+            "cwd": "${workspaceFolder}/practise",
+            "request": "launch",
+            "program": "transformer.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+            ]
+        }
+    ]
+}

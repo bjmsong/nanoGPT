@@ -57,16 +57,16 @@ def get_attn_pad_mask(seq_q, seq_k):
 
 class ScaledDotProductAttention(nn.Module):
     def __init__(self):
-        super(ScaledDotProductAttention, self).__init__
+        super(ScaledDotProductAttention, self).__init__()
 
     def forward(self, Q, K, V, attn_mask):
-        # (batch_size, n_heads, len_q, len_q)
-        scores = torch.matmul(Q, K.transpose(-1, -2)) / np.sqrt(d_k)
+        # (batch_size, n_heads, seqLen, seqLen)
+        attention_score = torch.matmul(Q, K.transpose(-1, -2)) / np.sqrt(d_k)
         # 把被mask的地方置为无限小，softmax之后基本就是0
-        scores.masked_fill_(attn_mask, -1e9)
-        # 在最后一个维度上进行softmax操作, (batch_size, n_heads, len_q, len_q)
-        attn = nn.Softmax(dim=-1)(scores)
-        # (batch_size, n_heads, len_q, d_v)
+        attention_score.masked_fill_(attn_mask, -1e9)
+        # 在最后一个维度上进行softmax操作, (batch_size, n_heads, seqLen, seqLen)
+        attn = nn.Softmax(dim=-1)(attention_score)
+        # (batch_size, n_heads, seqLen, d_v)
         context = torch.matmul(attn, V)
         return context, attn
 
@@ -80,26 +80,27 @@ class MultiHeadAttention(nn.Module):
         self.W_V = nn.Linear(d_model, d_v*n_heads)
         self.linear = nn.Linear(d_v*n_heads, d_model)
         self.layer_norm = nn.LayerNorm(d_model)
+        self.self_attention = ScaledDotProductAttention()
 
     def forward(self, Q, K, V, attn_mask):
         residual, batch_size = Q, Q.size()[0]
         """
         投影->分头->交换张量维度： (B, S, D) -proj-> (B, S, D) -split-> (B, S, H, W) -trans-> (B, H, S, W)
-        投影 self.W_Q(Q): (batch_size, len_q, d_model) -> (batch_size, len_q, d_k * n_heads)
-        分头 self.W_Q(Q).view(batch_size, -1, n_heads, d_k): (batch_size,len_q,d_k * n_heads)->(batch_size,len_q,n_heads,d_k)
-        交换张量维度 transpose(1,2): 维度1和2交换位置, (batch_size,len_q,n_heads, d_k) -> (batch_size, n_heads, len_q, d_k)
+        投影 self.W_Q(Q): (batch_size, seqLen, d_model) -> (batch_size, seqLen, d_k * n_heads)
+        分头 self.W_Q(Q).view(batch_size, -1, n_heads, d_k): (batch_size,seqLen,d_k * n_heads)->(batch_size,seqLen,n_heads,d_k)
+        交换张量维度 transpose(1,2): 维度1和2交换位置, (batch_size,seqLen,n_heads, d_k) -> (batch_size, n_heads, seqLen, d_k)
         """
         q_s = self.W_Q(Q).view(batch_size, -1, n_heads, d_k).transpose(1, 2)
         w_s = self.W_K(K).view(batch_size, -1, n_heads, d_k).transpose(1, 2)
         v_s = self.W_K(V).view(batch_size, -1, n_heads, d_v).transpose(1, 2)
 
-        # (batch_size, len_q, len_k) -> (batch_size, n_heads, len_q, len_k)，就是把pad信息重复到了n个头上
+        # (batch_size, seqLen, len_k) -> (batch_size, n_heads, seqLen, len_k)，就是把pad信息重复到了n个头上
         attn_mask = attn_mask.unsqueeze(1).repeat(1, n_heads, 1, 1)
 
-        context, attn = ScaledDotProductAttention(q_s, w_s, v_s, attn_mask)
-        # 多头注意力合并到一起，(batch_size, len_q, n_heads*d_v)
+        context, attn = self.self_attention(q_s, w_s, v_s, attn_mask)
+        # 多头注意力合并到一起，(batch_size, seqLen, n_heads*d_v)
         context = context.transpose(1, 2).continuous().view(batch_size, -1, n_heads*d_v)
-        # (batch_size, len_q, d_model)
+        # (batch_size, seqLen, d_model)
         output = self.linear(context)
         return self.layer_norm(output) + residual, attn
 
@@ -115,7 +116,7 @@ class PoswiseFeedForwardNet(nn.Module):
 
     def forward(self, inputs):
         residual = inputs
-        # (batch_size, len_q, d_model) -> (batch_size, d_model, len_q)
+        # (batch_size, seqLen, d_model) -> (batch_size, d_model, seqLen)
         output = nn.ReLu()(self.conv1(inputs.transpose(1, 2)))
         output = self.conv2(output).transpose(1, 2)
         return self.layer_norm(output + residual)
@@ -134,7 +135,7 @@ class EncoderLayer(nn.Module):
             enc_self_attn_mask (_type_): _description_
 
         Returns:
-            enc_outputs: (batch_size, len_q, d_model)
+            enc_outputs: (batch_size, seqLen, d_model)
         """
         enc_outputs, attn = self.enc_self_attn(enc_inputs, enc_inputs, enc_inputs, enc_self_attn_mask)
         enc_outputs = self.pos_ffn(enc_outputs)
@@ -142,7 +143,7 @@ class EncoderLayer(nn.Module):
         return enc_outputs, attn
 
 
-class Encoder(nn.Moduel):
+class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
         self.src_emb = nn.Embedding(src_vocab_size, d_model)
@@ -153,7 +154,7 @@ class Encoder(nn.Moduel):
         self.layers = nn.ModuleList([EncoderLayer() for _ in range(n_layers)])
 
     def forward(self, enc_inputs):
-        enc_outputs = self.src_emb(enc_inputs)
+        enc_outputs = self.src_emb(enc_inputs)  # (batch_size, seqlen) -> (batch_size, seqlen, embedding_size)
         # 最后一位是填充的，用0表示位置
         enc_outputs = enc_outputs + self.pos_emb(torch.LongTensor([1, 2, 3, 4, 0]))
         # 标识句子中哪些位置是被填充(pad)的
@@ -166,7 +167,7 @@ class Encoder(nn.Moduel):
         return enc_outputs, enc_self_attns
 
 
-class Decoder(nn.Moduel):
+class Decoder(nn.Module):
     def __init__(self):
         super(Decoder, self).__init__()
 
@@ -206,7 +207,7 @@ if __name__ == '__main__':
 
     # 模型超参数
     d_model = 512  # Embedding Size
-    d_ff = 2048  # FeedForward dimension
+    d_ff = 512*4  # FeedForward dimension
     d_k = d_v = 64  # K(=Q), V向量的维度
     n_layers = 6  # number of Encoder of Decoder Layer
     n_heads = 8  # number of heads in Multi-Head Attention
